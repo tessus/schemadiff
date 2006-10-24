@@ -1,0 +1,342 @@
+/*
+ * $Id$
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlenv.h>
+#include <sqlutil.h>
+#include <db2ApiDf.h>
+#include <malloc.h>
+#include <ctype.h>
+#include "utilemb.h"
+
+#define REVISION "$Revision$"
+
+#define MAX_ACC_LEN		32
+#define MAX_UID_LEN		32
+#define MAX_PWD_LEN		32
+#define MAX_DESC_LEN	64
+
+#define MAX_PATH_LEN	255
+
+char* getstr( int len );
+
+int VERBOSE = 0;
+
+EXEC SQL INCLUDE SQLCA;
+
+int main(int argc, char *argv[]) {
+
+	EXEC SQL BEGIN DECLARE SECTION;
+
+		char schema1[128];
+		char schema2[128];
+		
+		char hschema[128];
+		char tabname[128];
+		
+        short int tsind;			// indicator var for ts
+        short int recind[2];		// indicator var for password and description
+        
+        // colname, typename, length, scale, nulls
+        char colname1[128];
+        char typename1[128];
+        short length1;
+        short scale1;
+        char nulls1[1];
+        
+        char colname2[128];
+        char typename2[128];
+        short length2;
+        short scale2;
+        char nulls2[1];
+        
+        short count1, count2;
+
+        char uid[9];				// connection vars
+        char passwd[19];
+        char db[19];
+
+	EXEC SQL END DECLARE SECTION;
+
+	struct sqlca sqlca;				// sqlca structure
+	FILE *fp;						// filepointer fp
+	char filename[MAX_PATH_LEN];	// var for filename
+	int rc = 0;
+	char buf[128];
+	char *p = NULL;
+
+	switch( argc )
+	{
+		case 3:
+   			strcpy( schema1, argv[1] );
+   			strcpy( schema2, argv[2] );
+	      	break;
+		case 4:
+   			strcpy( schema1, argv[1] );
+   			strcpy( schema2, argv[2] );
+   			if( strcmp( "-v", argv[3] ) == 0)
+   			{
+   				VERBOSE = 1;
+   			}
+   			else
+   			{
+   				printf ("\nUSAGE: %s schema1 schema2 [-v]\n\n", argv[0]);
+   				return( -1 );
+   			}
+	      	break;
+      	default:
+      		printf ("\nUSAGE: %s schema1 schema2 [-v]\n\n", argv[0]);
+      		return( -1 );
+      		break;
+	}
+  
+	// init connection vars
+
+	db[0] = '\0';
+	uid[0] = '\0';
+	passwd[0] = '\0';
+	buf[0] = '\0';
+   
+	fp = fopen( "schemadiff.properties", "r" );
+	fgets(buf,128,fp);
+	strcpy( db, buf );
+	if (db[strlen(db)-1] == '\n') 
+	{
+		p = &db[strlen(db)-1];
+		*p = '\0';
+	}
+  	
+	buf[0] = '\0';
+  	fgets(buf,128,fp);
+  	strcpy( uid, buf );
+  	
+	buf[0] = '\0';
+  	fgets(buf,128,fp);
+  	strcpy( passwd, buf );
+  	
+	fclose( fp );
+   
+	if( strlen( db ) == 0 )
+	{	
+		fprintf( stdout, "ERROR: Database name not set.\n" );
+		exit(-99);
+	}
+	
+	if( VERBOSE )
+	{
+		fprintf( stdout, "Database: %s\n", db );
+		fprintf( stdout, "User    : %s\n", uid );
+		fprintf( stdout, "Password: %s\n", passwd );
+	}
+	   
+	if( strlen( passwd ) > 0 )
+	{
+		EXEC SQL CONNECT TO :db USER :uid USING :passwd;
+		EMB_SQL_CHECK("CONNECT TO DB");
+	}
+	else
+	{
+		EXEC SQL CONNECT TO :db;
+		EMB_SQL_CHECK("CONNECT TO DB");
+	}
+	
+	printf("\n");
+	printf("Database Schema Diff (%s) by Helmut K. C. Tessarek\n\n",REVISION);
+	
+	// check if schemata exist
+	
+	EXEC SQL SELECT schemaname INTO :hschema
+		FROM syscat.schemata
+		WHERE schemaname = :schema1;
+			
+	if( sqlca.sqlcode == 100 )
+	{
+		fprintf( stdout, "Schema %s not found.\n", schema1 );
+		rc = -2;
+	}
+	
+	EXEC SQL SELECT schemaname INTO :hschema
+		FROM syscat.schemata
+		WHERE schemaname = :schema2;
+			
+	if( sqlca.sqlcode == 100 )
+	{
+		fprintf( stdout, "Schema %s not found.\n", schema2 );
+		rc = -2;
+	}
+	
+	if( rc != 0 )
+	{
+		EXEC SQL CONNECT RESET;
+		fprintf( stdout, "\n" );
+		exit( rc );
+	}
+
+	// check if tables are only in one schema
+	
+	EXEC SQL DECLARE c1 CURSOR FOR
+		(SELECT tabname FROM syscat.tables WHERE tabschema = :schema1 ) 
+		EXCEPT
+		(SELECT tabname FROM syscat.tables WHERE tabschema = :schema2 );
+	
+	EXEC SQL OPEN c1;
+	
+	do {
+		EXEC SQL FETCH c1 INTO :tabname;
+		
+		if( SQLCODE != 0) break;
+		
+		fprintf( stdout, "(-) Table %s exists only in Schema %s\n", tabname, schema1 );
+	} while ( 1 );
+	
+	EXEC SQL CLOSE c1;
+	
+	EXEC SQL DECLARE c2 CURSOR FOR
+		(SELECT tabname FROM syscat.tables WHERE tabschema = :schema2 ) 
+		EXCEPT
+		(SELECT tabname FROM syscat.tables WHERE tabschema = :schema1 );
+	
+	EXEC SQL OPEN c2;
+	
+	do {
+		EXEC SQL FETCH c2 INTO :tabname;
+		
+		if( SQLCODE != 0) break;
+		
+		fprintf( stdout, "(-) Table %s exists only in Schema %s\n", tabname, schema2 );
+	} while ( 1 );
+	
+	EXEC SQL CLOSE c2;
+	
+	// compare schema1 and schema2
+	
+	EXEC SQL DECLARE listtables CURSOR FOR
+		SELECT a.tabname FROM syscat.tables a, syscat.tables b
+			WHERE a.tabschema = :schema1 AND b.tabschema = :schema2 AND a.tabname = b.tabname 
+			ORDER BY 1;
+	
+	EXEC SQL OPEN listtables;
+	
+	do {
+		EXEC SQL FETCH listtables INTO :tabname;
+		
+		if( SQLCODE != 0) break;
+		
+		// check if tables have the same number of cols
+		
+		EXEC SQL SELECT count(*) INTO :count1 FROM syscat.columns 
+			WHERE tabschema = :schema1 AND tabname = :tabname;
+		
+		EXEC SQL SELECT count(*) INTO :count2 FROM syscat.columns 
+			WHERE tabschema = :schema2 AND tabname = :tabname;
+			
+		if( count1 != count2 )
+		{
+			fprintf( stdout, "(-) %s.%s has %d columns | %s.%s has %d columns\n", schema1, tabname, count1, schema2, tabname, count2 );
+			continue;
+		}
+		
+		if( VERBOSE )
+			fprintf( stdout, "(v) %s\n", tabname );
+
+		EXEC SQL DECLARE cols1 CURSOR FOR
+			SELECT colname, typename, length, scale, nulls 
+			FROM syscat.columns 
+			WHERE tabschema = :schema1 and tabname = :tabname order by colno;
+			
+		EXEC SQL DECLARE cols2 CURSOR FOR
+			SELECT colname, typename, length, scale, nulls 
+			FROM syscat.columns 
+			WHERE tabschema = :schema2 and tabname = :tabname order by colno;
+			
+		EXEC SQL OPEN cols1;
+		EXEC SQL OPEN cols2;
+		
+		rc = 0;
+		
+		do {
+			EXEC SQL FETCH cols1 INTO :colname1, :typename1, :length1, :scale1, :nulls1;
+			if( SQLCODE != 0) break;
+			EXEC SQL FETCH cols2 INTO :colname2, :typename2, :length2, :scale2, :nulls2;
+			if( SQLCODE != 0) break;
+			
+					
+			if( strcmp( colname1, colname2 ) != 0 )
+			{
+				fprintf( stdout, "(-) Table %s: column names are different\n", tabname );
+				fprintf( stdout, "    %s: %s | %s: %s\n", schema1, colname1, schema2, colname2 );
+				rc = 1;
+			}
+			
+			if( strcmp( typename1, typename2 ) != 0 )
+			{
+				fprintf( stdout, "(-) Table %s: data types are different\n", tabname );
+				fprintf( stdout, "    Column %s:\n", colname1 );
+				fprintf( stdout, "    %s: %s | %s: %s\n", schema1, typename1, schema2, typename2 );
+				rc = 1;
+			}
+
+			if( length1 != length2 )
+			{
+				fprintf( stdout, "(-) Table %s: lengths are different\n", tabname );
+				fprintf( stdout, "    Column %s:\n", colname1 );
+				fprintf( stdout, "    %s: %d | %s: %d\n", schema1, length1, schema2, length2 );
+				rc = 1;
+			}
+			
+			if( scale1 != scale2 )
+			{
+				fprintf( stdout, "(-) Table %s: scales are different\n", tabname );
+				fprintf( stdout, "    Column %s:\n", colname1 );
+				fprintf( stdout, "    %s: %d | %s: %d\n", schema1, scale1, schema2, scale2 );
+				rc = 1;
+			}
+
+			if( strcmp( nulls1, nulls2 ) != 0 )
+			{
+				fprintf( stdout, "(-) Table %s: NOT NULL definitions are different\n", tabname );
+				fprintf( stdout, "    Column %s:\n", colname1 );
+				fprintf( stdout, "    %s: %s | %s: %s\n", schema1, nulls1, schema2, nulls2 );
+				rc = 1;
+			}
+			
+			if( VERBOSE )
+			{
+				fprintf( stdout, "(v) %s: %s - %s - %d - %d - %s\n", schema1, colname1, typename1, length1, scale1, nulls1 );
+				fprintf( stdout, "(v) %s: %s - %s - %d - %d - %s\n", schema2, colname2, typename2, length2, scale2, nulls2 );
+			}
+		
+		} while ( 1 );
+		
+		EXEC SQL CLOSE cols1;
+		EXEC SQL CLOSE cols2;
+		
+		if( rc == 0 )
+			fprintf( stdout, "(+) Table %s: ok\n", tabname );
+		
+	} while ( 1 );
+	
+	EXEC SQL CLOSE listtables;
+	
+	fprintf( stdout, "\n" );
+
+	EXEC SQL CONNECT RESET;
+	EMB_SQL_CHECK("CONNECT RESET");
+	return 0;
+}
+
+char* getstr( int len )
+{
+	char *result;
+
+	result = (char*)malloc(len*sizeof(char));
+
+	fgets( result, len, stdin );
+	result[strlen(result)-1] = '\0';
+
+	return result;
+}

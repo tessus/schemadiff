@@ -1,0 +1,8 @@
+*.bnd
+*.c
+*.o
+*.exe
+schemadiff
+*.pdb
+*.MSG
+c.bat
