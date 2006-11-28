@@ -11,6 +11,7 @@
 #include <db2ApiDf.h>
 #include <malloc.h>
 #include <ctype.h>
+#include <unistd.h>
 #include "utilemb.h"
 
 #define REVISION "$Revision$"
@@ -19,10 +20,11 @@
 #define MAX_PATH_LEN	255
 
 int VERBOSE = 0;
+int ICOLORD = 0;
 
 EXEC SQL INCLUDE SQLCA;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
 
 	EXEC SQL BEGIN DECLARE SECTION;
 
@@ -62,32 +64,37 @@ int main(int argc, char *argv[]) {
 	int rc = 0;
 	char buf[MAX_LEN];
 	char *p = NULL;
+	
+	int c, index;
 
-	switch( argc )
+	while ((c = getopt (argc, argv, "cvh")) != -1)
 	{
-		case 3:
-   			strcpy( schema1, argv[1] );
-   			strcpy( schema2, argv[2] );
-	      	break;
-		case 4:
-   			strcpy( schema1, argv[1] );
-   			strcpy( schema2, argv[2] );
-   			if( strcmp( "-v", argv[3] ) == 0)
-   			{
-   				VERBOSE = 1;
-   			}
-   			else
-   			{
-   				printf ("\nUSAGE: %s schema1 schema2 [-v]\n\n", argv[0]);
+		switch (c)
+		{
+			case 'c':
+				ICOLORD = 1;
+				break;
+            case 'v':
+            	VERBOSE = 1;
+            	break;
+            case '?':
+            case 'h':
+            	fprintf( stderr, "\nUSAGE: %s schema1 schema2 [-c] [-v]\n\n", argv[0] );
    				return( -1 );
-   			}
-	      	break;
-      	default:
-      		printf ("\nUSAGE: %s schema1 schema2 [-v]\n\n", argv[0]);
-      		return( -1 );
-      		break;
+            default:
+            	abort ();
+    	}
+    }
+	
+	if( argc < 3 )
+	{
+		fprintf( stderr, "\nUSAGE: %s schema1 schema2 [-c] [-v]\n\n", argv[0] );
+		return( 1 );
 	}
-  
+    
+    strcpy( schema1, argv[optind] );
+    strcpy( schema2, argv[optind+1] );
+
 	// init connection vars
 
 	db[0] = '\0';
@@ -125,6 +132,9 @@ int main(int argc, char *argv[]) {
 		fprintf( stdout, "Database: %s\n", db );
 		fprintf( stdout, "User    : %s\n", uid );
 		fprintf( stdout, "Password: %s\n", passwd );
+		fprintf( stdout, "Ignore column order: %d \n", ICOLORD );
+	    fprintf( stdout, "Verbose            : %d \n", VERBOSE );
+		fprintf( stdout, "Schema1: %s, Schema2: %s\n", schema1, schema2 );
 	}
 	   
 	if( strlen( passwd ) > 0 )
@@ -237,25 +247,54 @@ int main(int argc, char *argv[]) {
 		if( VERBOSE )
 			fprintf( stdout, "(v) %s\n", tabname );
 
-		EXEC SQL DECLARE cols1 CURSOR FOR
-			SELECT colname, typename, length, scale, nulls 
-			FROM syscat.columns 
-			WHERE tabschema = :schema1 and tabname = :tabname order by colno;
+		if( ICOLORD == 0 )
+		{
+			EXEC SQL DECLARE cols1 CURSOR FOR
+				SELECT colname, typename, length, scale, nulls 
+				FROM syscat.columns 
+				WHERE tabschema = :schema1 and tabname = :tabname order by colno;
 			
-		EXEC SQL DECLARE cols2 CURSOR FOR
-			SELECT colname, typename, length, scale, nulls 
-			FROM syscat.columns 
-			WHERE tabschema = :schema2 and tabname = :tabname order by colno;
+			EXEC SQL DECLARE cols2 CURSOR FOR
+				SELECT colname, typename, length, scale, nulls 
+				FROM syscat.columns 
+				WHERE tabschema = :schema2 and tabname = :tabname order by colno;
+		}
+		else
+		{
+			EXEC SQL DECLARE cols1i CURSOR FOR
+				SELECT colname, typename, length, scale, nulls 
+				FROM syscat.columns 
+				WHERE tabschema = :schema1 and tabname = :tabname order by colname;
 			
-		EXEC SQL OPEN cols1;
-		EXEC SQL OPEN cols2;
+			EXEC SQL DECLARE cols2i CURSOR FOR
+				SELECT colname, typename, length, scale, nulls 
+				FROM syscat.columns 
+				WHERE tabschema = :schema2 and tabname = :tabname order by colname;
+		}
+
+		if( ICOLORD == 0 )
+		{
+			EXEC SQL OPEN cols1;
+			EXEC SQL OPEN cols2;
+		}
+		else
+		{
+			EXEC SQL OPEN cols1i;
+			EXEC SQL OPEN cols2i;
+		}
 		
 		rc = 0;
 		
 		do {
-			EXEC SQL FETCH cols1 INTO :colname1, :typename1, :length1, :scale1, :nulls1;
+			if( ICOLORD == 0 )
+				EXEC SQL FETCH cols1 INTO :colname1, :typename1, :length1, :scale1, :nulls1;
+			else
+				EXEC SQL FETCH cols1i INTO :colname1, :typename1, :length1, :scale1, :nulls1;
 			if( SQLCODE != 0) break;
-			EXEC SQL FETCH cols2 INTO :colname2, :typename2, :length2, :scale2, :nulls2;
+			if( ICOLORD == 0 )
+				EXEC SQL FETCH cols2 INTO :colname2, :typename2, :length2, :scale2, :nulls2;
+			else
+				EXEC SQL FETCH cols2i INTO :colname2, :typename2, :length2, :scale2, :nulls2;
 			if( SQLCODE != 0) break;
 			
 					
@@ -306,8 +345,16 @@ int main(int argc, char *argv[]) {
 		
 		} while ( 1 );
 		
-		EXEC SQL CLOSE cols1;
-		EXEC SQL CLOSE cols2;
+		if( ICOLORD == 0 )
+		{
+			EXEC SQL CLOSE cols1;
+			EXEC SQL CLOSE cols2;
+		}
+		else
+		{
+			EXEC SQL CLOSE cols1i;
+			EXEC SQL CLOSE cols2i;
+		}
 		
 		if( rc == 0 )
 			fprintf( stdout, "(+) Table %s: ok\n", tabname );
