@@ -1,25 +1,5 @@
 #! /bin/sh
-#
-# $Id$
-#
-#############################################################################
-# Licensed Materials - Property of IBM
-# 
-# Governed under the terms of the International
-# License Agreement for Non-Warranted Sample Code.
-#
-# (C) COPYRIGHT International Business Machines Corp. 1995 - 2003
-# All Rights Reserved.
-#
-# US Government Users Restricted Rights - Use, duplication or
-# disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
-#############################################################################
-# SCRIPT: embprep
-# To prep and bind C/C++ and Micro Focus COBOL embedded SQL programs
-#
-# Usage: embprep <prog_name> [ <db_name> [ <userid> <password> ]]
 
-# Connect to a database.
 if (test $# -lt 2)
 then
    db2 connect to sample

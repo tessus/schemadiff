@@ -1,0 +1,8 @@
+This was a quick hack to output the differences of 2 schemas in a database.
+A properties file was used for database, user, and password, so that the credentials won't show up in the process list.
+
+The schemadiff.properties file has the following format:
+
+database name
+user
+password

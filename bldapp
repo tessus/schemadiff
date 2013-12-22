@@ -1,24 +1,5 @@
 #! /bin/sh
-#
-# $Id$
-#
-#############################################################################
-# Licensed Materials - Property of IBM
-#
-# Governed under the terms of the International
-# License Agreement for Non-Warranted Sample Code.
-#
-# (C) COPYRIGHT International Business Machines Corp. 1995, 2002
-# All Rights Reserved.
-#
-# US Government Users Restricted Rights - Use, duplication or
-# disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
-############################################################################# 
-# SCRIPT: bldapp
-# Builds C applications for Linux
-# Usage: bldapp <prog_name> [ <db_name> [ <userid> <password> ]]
 
-# Select a compiler to use
 CC=gcc
 #CC=xlc_r
 
