@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include "utilemb.h"
 
-#define REVISION "$Revision$"
+#define REVISION "4"
 
 #define MAX_LEN			128
 #define MAX_PATH_LEN	255
